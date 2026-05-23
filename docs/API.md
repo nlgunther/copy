@@ -127,12 +127,14 @@ Source is authoritative: when src and tgt have similar stories for the same
 date, the source version is kept. Target-only stories that are genuinely new
 (similarity below threshold against all src stories for that date) are appended.
 
-#### `__init__(threshold=0.95, dry_run=False)`
+#### `__init__(threshold=0.95, dry_run=False, startdate=None)`
 
 **Parameters:**
 - `threshold` (float): Cosine-similarity cutoff. Segments at or above this
   value are considered duplicates. Default: `0.95`.
 - `dry_run` (bool): If True, log actions but write nothing. Default: `False`.
+- `startdate` (datetime.datetime | None): If set, `sync()` returns 0 immediately
+  when the source file's mtime is before this date. Default: `None`.
 
 #### `merge(src_data, tgt_data) → dict[date, list[str]]`
 
@@ -222,18 +224,14 @@ print(f"Would change {changed} file(s)")
 
 Copy newer files from a source tree to a target tree.
 
-#### `__init__(exclude_list=None, shallow_list=None, keep_list=None, cutoff=None, dry_run=False)`
+#### `__init__(exclude_list=None, shallow_list=None, dry_run=False, startdate=None)`
 
 **Parameters:**
 - `exclude_list` (list[str] | None): Directory names to skip entirely.
-- `shallow_list` (list[str] | None): Regex patterns matched against directory
-  names. Matching directories are copied top-level only (no recursion).
-- `keep_list` (list[str] | None): Regex patterns matched against the full path.
-  A directory is exempt from shallow restriction if its path matches any entry
-  here, even if its name matches `shallow_list`.
-- `cutoff` (datetime.datetime | None): Files with mtime before this datetime
-  are not copied.
+- `shallow_list` (list[str] | None): Reserved for future use.
 - `dry_run` (bool): If True, log actions but write nothing. Default: `False`.
+- `startdate` (datetime.datetime | None): If set, source files with mtime before
+  this date are skipped. Default: `None`.
 
 #### `sync_tree(src_root, tgt_root) → tuple[list[str], list[str]]`
 

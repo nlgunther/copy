@@ -2,61 +2,47 @@
 
 ## Common Operations
 
-### Content-aware merge — single file pair
+### Mirror — basic
 ```bash
-sync-agent content merge --src ~/journal/diary.odt --tgt ~/backup/diary.odt
+sync-agent mirror "C:\Users\Ken\PortFiles" "D:\PortFiles"
 ```
 
-### Content-aware merge — directory
+### Mirror — exclude a folder
 ```bash
-sync-agent content merge --src ~/journal/ --tgt ~/backup/journal/
+sync-agent mirror "C:\Users\Ken\PortFiles" "D:\PortFiles" --exclude NLGMassFiles
 ```
 
-### Content-aware merge — lower threshold (catch near-duplicates)
+### Mirror — skip files older than a date
 ```bash
-sync-agent content merge --src ~/journal/ --tgt ~/backup/ --threshold 0.85
+sync-agent mirror "C:\Users\Ken\PortFiles" "D:\PortFiles" --startdate 01-01-2020
+```
+
+### Mirror — combine exclude and startdate
+```bash
+sync-agent mirror "C:\Users\Ken\PortFiles" "D:\PortFiles" --exclude NLGMassFiles --startdate 01-01-2020
+```
+
+### Content sync — single ODF file pair
+```bash
+sync-agent content "C:\Source\diary.odt" "D:\Backup\diary.odt"
+```
+
+### Content sync — skip file if older than a date
+```bash
+sync-agent content "C:\Source\diary.odt" "D:\Backup\diary.odt" --startdate 01-01-2020
 ```
 
 ### Dry run (preview only, no writes)
 ```bash
-sync-agent content merge --src ~/journal/ --tgt ~/backup/ --dry-run
-sync-agent mirror --src ~/Documents/ --tgt /mnt/backup/ --dry-run
+sync-agent mirror "C:\Users\Ken\PortFiles" "D:\PortFiles" --dry-run
+sync-agent content "C:\Source\diary.odt" "D:\Backup\diary.odt" --dry-run
 ```
 
-### Mirror with cutoff
+### Typical two-command workflow (mirror everything, content-sync one folder)
 ```bash
-sync-agent mirror --src ~/Documents/ --tgt /mnt/backup/ --cutoff 2024-06-01
+sync-agent mirror "C:\Users\Ken\PortFiles" "D:\PortFiles" --exclude NLGMassFiles --startdate 01-01-2020
+sync-agent content "C:\Users\Ken\PortFiles\NLGFiles\NLGMassFiles" "D:\PortFiles\NLGFiles\NLGMassFiles" --startdate 01-01-2020
 ```
-
-### Mirror — exclude folders by name
-```bash
-sync-agent mirror --src ~/Projects/ --tgt /mnt/backup/ \
-    --exclude node_modules --exclude .git --exclude __pycache__
-```
-
-### Mirror — shallow copy matching directories (no recursion)
-```bash
-# Copy top-level files in any folder named "archive", but don't recurse
-sync-agent mirror --src ~/Projects/ --tgt /mnt/backup/ --shallow archive
-```
-
-### Mirror — keep recursing into specific paths even if shallow matches
-```bash
-# Shallow on "archive", but recurse into paths containing "important"
-sync-agent mirror --src ~/Projects/ --tgt /mnt/backup/ \
-    --shallow archive --keep important
-```
-
----
-
-## `content merge` Parameters
-
-| Flag | Type | Default | Purpose |
-|------|------|---------|---------|
-| `--src` | path | required | Source `.odt` file or directory |
-| `--tgt` | path | required | Target `.odt` file or directory |
-| `--threshold` | float | `0.95` | Similarity threshold; segments with cosine similarity ≥ threshold are treated as duplicates |
-| `--dry-run` | flag | off | Log what would change; write nothing |
 
 ---
 
@@ -64,41 +50,40 @@ sync-agent mirror --src ~/Projects/ --tgt /mnt/backup/ \
 
 | Flag | Type | Default | Purpose |
 |------|------|---------|---------|
-| `--src` | path | required | Source directory root |
-| `--tgt` | path | required | Target directory root |
+| `src` | path | required | Source directory root |
+| `tgt` | path | required | Target directory root |
 | `--exclude` | name (repeatable) | none | Directory names to skip entirely |
-| `--shallow` | pattern (repeatable) | none | Directory names to copy top-level only (no recursion) |
-| `--keep` | pattern (repeatable) | none | Path substrings exempt from shallow restriction |
-| `--cutoff` | `YYYY-MM-DD` | none | Skip files older than this date |
+| `--startdate` | `MM-DD-YYYY` | none | Skip source files with mtime before this date |
+| `--dry-run` | flag | off | Log what would change; write nothing |
+
+A file is copied only if it is new to the target **or** its source mtime is more
+than 30 seconds ahead of the target's mtime.
+
+---
+
+## `content` Parameters
+
+| Flag | Type | Default | Purpose |
+|------|------|---------|---------|
+| `src` | path | required | Source `.odt` file |
+| `tgt` | path | required | Target `.odt` file |
+| `--threshold` | float | `0.95` | Cosine-similarity cutoff for deduplication |
+| `--startdate` | `MM-DD-YYYY` | none | Skip if source file mtime is before this date |
 | `--dry-run` | flag | off | Log what would change; write nothing |
 
 ---
 
 ## Common Gotchas
 
-**Threshold is inclusive** — a pair with similarity exactly equal to the
-threshold is treated as a duplicate and the target segment is dropped.
-If you want to keep slightly similar entries, lower the threshold, don't raise it.
+**`--exclude` matches on folder name, not path** — `--exclude NLGMassFiles`
+skips any directory named `NLGMassFiles` anywhere in the tree.
 
-**Directory mode ignores numbered and "copy" files** — files whose names
-contain digits or the word "copy" (case-insensitive) are excluded from
-discovery. This prevents re-processing already-archived ODT files like
-`diary_2024_01_01.odt`.
+**`--startdate` applies to the source file's last-modified timestamp** — it does
+not filter by content dates inside the ODF file.
 
-**Legacy archives accumulate** — each directory-mode run that overwrites a
-target file adds a dated copy in `tgt/legacy/`. Clean this folder periodically
-if disk space matters.
+**Mirror does not delete** — files removed from the source are never removed
+from the target. Mirror is additive only.
 
-**Mirror does not delete** — files removed from the source tree are never
-removed from the target. Mirror is additive only.
-
-**`.eml` files and `venv` paths are always skipped** in mirror mode, regardless
-of exclude-list settings.
-
-**Future-timestamped files are skipped** — files with mtime after run-start are
-silently ignored. This handles clock-skew artifacts from external drives; check
-your system clock if newly created files aren't being mirrored.
-
-**Mirror log files** — after a non-dry-run mirror, `copied_YYYY_MM_DD.txt` and
-`problems_YYYY_MM_DD.txt` are written to `tgt_root` if there is anything to
-report.
+**30-second mtime tolerance** — mirror skips a file if the source is fewer than
+30 seconds newer than the target, to avoid re-copying files with near-identical
+timestamps (e.g. from a previous copy operation).

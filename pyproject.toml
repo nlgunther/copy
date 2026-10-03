@@ -8,7 +8,6 @@ version = "1.0.0"
 description = "Professional segmented ODF and file sync utility"
 dependencies = [
     "odfpy",
-    "pyyaml",
     "python-dateutil",
     "loguru",
     "pywin32; platform_system=='Windows'",
@@ -20,5 +19,5 @@ test = ["pytest"]
 [project.scripts]
 sync-agent = "sync_agent.cli:main"
 
-[tool.setuptools]
-packages = ["sync_agent"]
+[tool.setuptools.packages.find]
+where = ["src"]

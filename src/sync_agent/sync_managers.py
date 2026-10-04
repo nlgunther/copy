@@ -5,8 +5,8 @@ import shutil
 
 from loguru import logger
 
-from .content_engine import SegmentedODFHandler, normalize
-from .similarity import similarity
+from .comparison import LegacyRecordComparator, RecordComparator
+from .content_engine import SegmentedODFHandler
 
 # Files matching this pattern are excluded from directory discovery:
 # date-stamped copies (digits in name) and explicit "copy" files.
@@ -30,17 +30,21 @@ class ContentAwareSync:
     appended.
     """
 
-    def __init__(self, threshold: float = 0.95, dry_run: bool = False):
+    def __init__(
+        self,
+        threshold: float = 0.95,
+        dry_run: bool = False,
+        comparator: RecordComparator | None = None,
+    ):
         self.threshold = threshold
         self.dry_run = dry_run
         self._handler = SegmentedODFHandler()
+        self._comparator = comparator or LegacyRecordComparator(threshold=threshold)
 
     def _is_new(self, candidate: str, existing: list) -> bool:
-        """True if candidate's similarity to every existing segment is below threshold."""
-        tokens = normalize(candidate).split()
-        return all(
-            similarity(tokens, normalize(s).split()) < self.threshold
-            for s in existing
+        """True if candidate is not a duplicate of any existing segment."""
+        return not any(
+            self._comparator.compare(candidate, s).is_duplicate for s in existing
         )
 
     def merge(self, src_data: dict, tgt_data: dict) -> dict:

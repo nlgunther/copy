@@ -13,6 +13,12 @@ import pytest
 from odf import text, teletype
 from odf.opendocument import OpenDocumentText
 
+from sync_agent.comparison import (
+    ComparisonResult,
+    CosineTokenSimilarity,
+    LegacyRecordComparator,
+    convert,
+)
 from sync_agent.content_engine import SegmentedODFHandler, normalize
 from sync_agent.similarity import similarity
 from sync_agent.sync_managers import ContentAwareSync, SimpleMirrorSync
@@ -93,6 +99,84 @@ class TestNormalize:
 
     def test_empty_string(self):
         assert normalize("") == ""
+
+
+# ---------------------------------------------------------------------------
+# comparison — pure string comparisons, no .odt I/O
+# ---------------------------------------------------------------------------
+
+class TestConvert:
+    def test_strips_punctuation_and_case(self):
+        assert convert("Hello, World!") == "helloworld"
+
+    def test_identical_after_strip(self):
+        assert convert("<CA_HP_DSKTP>") == convert('<CA_HP_DSKTP>"')
+
+
+class TestLegacyRecordComparator:
+    def test_exact_duplicate_is_duplicate(self):
+        c = LegacyRecordComparator()
+        result = c.compare("<3/14/2026><CA_HP_DSKTP>", "<3/14/2026><CA_HP_DSKTP>")
+        assert result.is_duplicate is True
+        assert result.method == "exact"
+        assert result.score == 1.0
+
+    def test_bracket_tag_only_duplicate_caught_by_coarse_layer(self):
+        # Regression: normalize() strips the whole bracket tag, leaving an
+        # empty token list on both sides. The fine (similarity) layer alone
+        # scores similarity([], []) == 0.0 and would wrongly call this "new".
+        # The coarse exact-match layer must catch it first.
+        c = LegacyRecordComparator()
+        result = c.compare("<CA_HP_DSKTP>", "<CA_HP_DSKTP>")
+        assert result.is_duplicate is True
+        assert result.method == "exact"
+
+    def test_differs_only_by_trailing_punctuation_is_duplicate(self):
+        c = LegacyRecordComparator()
+        result = c.compare("<CA_HP_DSKTP>", '<CA_HP_DSKTP>"')
+        assert result.is_duplicate is True
+        assert result.method == "exact"
+
+    def test_near_duplicate_caught_by_similarity_layer(self):
+        c = LegacyRecordComparator(threshold=0.5)
+        result = c.compare("hello world foo bar", "hello world foo baz")
+        assert result.is_duplicate is True
+        assert result.method == "similarity"
+        assert result.score == pytest.approx(0.75)
+
+    def test_dissimilar_strings_not_duplicate(self):
+        c = LegacyRecordComparator()
+        result = c.compare(
+            "The cat sat on the mat",
+            "A completely different story about rockets",
+        )
+        assert result.is_duplicate is False
+        assert result.method == "similarity"
+
+    def test_never_returns_none(self):
+        # compare() always returns a ComparisonResult — never None — so a
+        # code flaw that fails to return can't masquerade as "not a duplicate".
+        c = LegacyRecordComparator()
+        for a, b in [("", ""), ("x", "y"), ("<1/1/2024>Same", "<1/1/2024>Same")]:
+            result = c.compare(a, b)
+            assert result is not None
+            assert isinstance(result, ComparisonResult)
+
+    def test_custom_similarity_measure_is_used(self):
+        class AlwaysZero:
+            def score(self, tokens_a, tokens_b):
+                return 0.0
+
+        c = LegacyRecordComparator(similarity=AlwaysZero())
+        result = c.compare("totally different a", "totally different b")
+        assert result.score == 0.0
+        assert result.is_duplicate is False
+
+
+class TestCosineTokenSimilarity:
+    def test_delegates_to_similarity_module(self):
+        s = CosineTokenSimilarity()
+        assert s.score(["hello", "world"], ["hello", "world"]) == pytest.approx(1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +271,24 @@ class TestMerge:
         tgt = {D1: ["Story B", "Story C"]}
         merged = s.merge(src, tgt)
         assert len(merged[D1]) == 3
+
+    def test_bracket_tag_only_exact_duplicate_not_duplicated(self):
+        # Regression: a segment that's nothing but a bracket tag normalizes
+        # to an empty token list on both sides, and similarity([], []) == 0.0
+        # used to make merge() treat it as new, duplicating it. The coarse
+        # exact-match layer in LegacyRecordComparator catches this case.
+        s = ContentAwareSync()
+        merged = s.merge({D1: ["<CA_HP_DSKTP>"]}, {D1: ["<CA_HP_DSKTP>"]})
+        assert merged[D1] == ["<CA_HP_DSKTP>"]
+
+    def test_custom_comparator_is_used(self):
+        class AlwaysDuplicate:
+            def compare(self, a, b):
+                return ComparisonResult(is_duplicate=True, method="exact", score=1.0)
+
+        s = ContentAwareSync(comparator=AlwaysDuplicate())
+        merged = s.merge({D1: ["A"]}, {D1: ["Completely unrelated text"]})
+        assert merged[D1] == ["A"]
 
 
 # ---------------------------------------------------------------------------
